@@ -141,7 +141,6 @@ void setup_wifi()
     //wifiManager.autoConnect(DEVICE_NAME);
 
     WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-    //WiFi.begin("McLellan", "minceontoast");
 }
 
 void check_wifi() {
