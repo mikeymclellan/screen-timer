@@ -3,6 +3,9 @@
 Automatically turn dashboard TVs on during working hours, and off after hours. Uses a ESP32 connected to HDMI-CEC to
 control the TV. Needs to connect to Wi-Fi and NTP to get the time.
 
+<img src="doc/photo.jpg" alt="Screenshot" width="500" />
+
+
 ## Development
 
     pio run -t uploadfs
