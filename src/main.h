@@ -8,7 +8,9 @@
 #define CEC_PHYSICAL_ADDRESS 0x2000
 #define HDMI_CHANNEL 1
 
-#define WIFI_SSID "XXX"
-#define WIFI_PASSWORD "xxxx"
+#define WIFI_SSID "Pet Direct"
+#define WIFI_PASSWORD "CoopsLovesLamb!"
+//#define WIFI_SSID "McLellan"
+//#define WIFI_PASSWORD "minceontoast"
 
 #endif

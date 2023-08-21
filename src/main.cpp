@@ -121,14 +121,17 @@ void setup_ntp()
 {
     struct tm timeinfo;
 
-    Serial.println("Setting up time");
-    configTime(0, 0, "pool.ntp.org");
-    setenv("TZ", "NZST-12NZDT,M9.5.0,M4.1.0/3",1);
-    tzset();
+    while (1)  {
+        Serial.println("Setting up time");
+        configTime(0, 0, "pool.ntp.org");
+        setenv("TZ", "NZST-12NZDT,M9.5.0,M4.1.0/3",1);
+        tzset();
 
-    if (!getLocalTime(&timeinfo)) {
-        Serial.println("Failed to obtain time");
-        return;
+        if (!getLocalTime(&timeinfo)) {
+            Serial.println("Failed to obtain time");
+            continue;
+        }
+        break;
     }
     Serial.println(&timeinfo, "%A, %B %d %Y %H:%M:%S zone %Z %z ");
 }
@@ -141,6 +144,11 @@ void setup_wifi()
     //wifiManager.autoConnect(DEVICE_NAME);
 
     WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    while (WiFi.status() != WL_CONNECTED) {
+        Serial.println("Wifi connecting...");
+        delay(500);
+    }
+    Serial.println("Wifi connected");
 }
 
 void check_wifi() {
