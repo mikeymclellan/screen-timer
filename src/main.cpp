@@ -12,7 +12,7 @@
 #include "FS.h"
 #include "main.h"
 
-bool isTransmitting = false;
+bool isTransmitting = true;
 
 class MyCEC_Device : public CEC_Device
 {
@@ -68,6 +68,7 @@ void MyCEC_Device::OnReceiveComplete(unsigned char* buffer, int count, bool ack)
 
     if (count == 1) {
         // This seems to be what happens with the Chromecast, no message then reply with vendor id
+        isTransmitting = true;
         TransmitFrame(0xf, (unsigned char*)"\x87\x01\x23\x45", 4); // <Device Vendor ID>
     }
 	// No command received?
@@ -77,19 +78,24 @@ void MyCEC_Device::OnReceiveComplete(unsigned char* buffer, int count, bool ack)
 	switch (buffer[1]) {
         case 0x83: { // <Give Physical Address>
             unsigned char buf[4] = {0x84, CEC_PHYSICAL_ADDRESS >> 8, CEC_PHYSICAL_ADDRESS & 0xff, CEC_DEVICE_TYPE};
+            isTransmitting = true;
             TransmitFrame(0xf, buf, 4); // <Report Physical Address>
             break;
         }
         case 0x8c: // <Give Device Vendor ID>
+            isTransmitting = true;
             TransmitFrame(0xf, (unsigned char*)"\x87\x01\x23\x45", 4); // <Device Vendor ID>
             break;
         case 0x8f: // <Give Power status>
+            isTransmitting = true;
             TransmitFrame(0xf, (unsigned char*)"\x90\x00", 2);
             break;
         case 0x46: // <Give Device Name>
+            isTransmitting = true;
             TransmitFrame(0xf, (unsigned char*)"\x47\x53\x63\x72\x65\x6e\x54\x69\x6d\x65\x72", 11);
             break;
         case 0x9f: // <Give CEC Version>
+            isTransmitting = true;
             TransmitFrame(0xf, (unsigned char*)"\x9e\x05", 2);
             break;
     }
@@ -97,7 +103,7 @@ void MyCEC_Device::OnReceiveComplete(unsigned char* buffer, int count, bool ack)
 
 void MyCEC_Device::OnTransmitComplete(unsigned char* buffer, int count, bool ack)
 {
-    isTransmitting = 0;
+    isTransmitting = false;
 	// This is called after a frame is transmitted.
 	DbgPrint("Packet sent at %ld: %02X", millis(), buffer[0]);
 	for (int i = 1; i < count; i++)
@@ -108,6 +114,16 @@ void MyCEC_Device::OnTransmitComplete(unsigned char* buffer, int count, bool ack
 }
 
 MyCEC_Device device;
+
+bool transmit_frame(int targetAddress, const unsigned char* buffer, int count)
+{
+    if (isTransmitting) {
+        // Can't transmit a frame while another is in progress
+        return false;
+    }
+    isTransmitting = device.TransmitFrame(targetAddress, buffer, count);;
+    return isTransmitting;
+}
 
 void working_led()
 {
@@ -121,19 +137,27 @@ void setup_ntp()
 {
     struct tm timeinfo;
 
-    while (1)  {
-        Serial.println("Setting up time");
-        configTime(0, 0, "pool.ntp.org");
-        setenv("TZ", "NZST-12NZDT,M9.5.0,M4.1.0/3",1);
-        tzset();
+    Serial.println("Setting up time");
+    configTime(0, 0, "pool.ntp.org");
+    setenv("TZ", "NZST-12NZDT,M9.5.0,M4.1.0/3",1);
+    tzset();
 
-        if (!getLocalTime(&timeinfo)) {
-            Serial.println("Failed to obtain time");
-            continue;
-        }
-        break;
+    if (!getLocalTime(&timeinfo)) {
+        Serial.println("Failed to obtain time");
+        return;
     }
     Serial.println(&timeinfo, "%A, %B %d %Y %H:%M:%S zone %Z %z ");
+}
+
+void check_ntp() {
+    struct tm timeinfo;
+
+    if (WiFi.status() != WL_CONNECTED) {
+        return;
+    }
+    if (!getLocalTime(&timeinfo)) {
+        setup_ntp();
+    }
 }
 
 void setup_wifi()
@@ -154,6 +178,10 @@ void setup_wifi()
 void check_wifi() {
     if (WiFi.status() != WL_CONNECTED) {
         setup_wifi();
+
+        // Display "Connecting..." on screen - doesn't seem to be supported on Samsungs?
+        //transmit_frame(0x0, (unsigned char*)"\x04", 1);
+        //transmit_frame(0x0, (unsigned char*)"\x64\x00Cnting...", 11);
     }
 }
 
@@ -192,12 +220,6 @@ void setup_cec()
 	device.Initialize(CEC_PHYSICAL_ADDRESS, CEC_DEVICE_TYPE, true); // Promiscuous mode
 }
 
-bool transmit_frame(int targetAddress, const unsigned char* buffer, int count)
-{
-    isTransmitting = true;
-    return device.TransmitFrame(targetAddress, buffer, count);
-}
-
 void tv_hdmi(int number)
 {
     unsigned char buffer[3];
@@ -217,12 +239,23 @@ void tv_off()
     transmit_frame(0x0, (unsigned char*)"\x36", 1);
 }
 
+bool is_executing_input_then_off = false;
+
+void execute_input_then_off()
+{
+    // Samsung TVs seem to only turn off if changing import first :shrug:
+    tv_hdmi(HDMI_CHANNEL);
+    is_executing_input_then_off = true;
+}
+
 void setup_cron() {
-    Cron.create("0 0 17 * * 1-5", tv_off, false);
-    Cron.create("0 0 7 * * 1-5", tv_on,  false);
+    Cron.create("0 0 17 * * 1-5", execute_input_then_off, false);
+    Cron.create("0 0 6 * * 1-5", tv_on,  false);
     //Cron.create("0 * * * * 0-6", tv_on, false);
     //Cron.create("30 * * * * 0-6", tv_off, false);
 }
+
+unsigned long lastCheckTime = 0;
 
 void setup()
 {
@@ -234,21 +267,34 @@ void setup()
     setup_mdns();
     setup_cec();
     setup_ota_firmware();
+    tv_hdmi(HDMI_CHANNEL);
+
 }
 
 bool enableCron = true;
+
 void loop()
 {
     if (!isTransmitting)  {
-        check_wifi();
 
         if (enableCron) {
             // Enabling OTA firmware updates or Cron will cause delays in CEC handler so receives will be missed
             otaHttpServer.handleClient();
             Cron.delay();
         }
+
+//        if (micros() - lastCheckTime > 5000000) {
+//            lastCheckTime = micros();
+//            check_ntp();
+//            check_wifi();
+//        }
     }
     device.Run();
+
+    if (is_executing_input_then_off && !isTransmitting) {
+        tv_off();
+        is_executing_input_then_off = false;
+    }
 
     if (Serial.available()) {
 
@@ -256,7 +302,7 @@ void loop()
         enableCron = false;
         switch (Serial.read()) {
             case '0':
-                tv_off();
+                execute_input_then_off();
                 break;
             case 'o':
                 tv_on();
